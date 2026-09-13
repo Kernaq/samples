@@ -18,8 +18,8 @@ examples/
   web-vite/          Vite + React frontend — works with any backend below
   node-express/      Express.js backend  (@kernaq/identity)
   python-fastapi/    FastAPI backend      (kernaq-identity)
-  go-gin/            Gin backend          (github.com/Kernaq/SDKs/identity/go)
-  java-spring/       Spring Boot backend  (com.github.Kernaq:SDKs)
+  go-gin/            Gin backend          (github.com/Kernaq/sdk-go)
+  java-spring/       Spring Boot backend  (com.github.Kernaq.SDKs:kernaq-identity)
 ```
 
 ## Quick start
