@@ -68,11 +68,10 @@ export async function handleVerify(req, res) {
 
     // Hand off to the service — handler's job ends here
     const record = await verificationService.verify(fileBuffers, fields)
-
     res.json(record)
   } catch (err) {
     console.error('Verification error:', err)
-    res.status(422).json({ error: err.message || 'Verification failed' })
+    res.status(500).json({ error: err.message || 'Verification failed' })
   }
 }
 

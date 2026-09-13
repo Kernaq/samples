@@ -21,20 +21,13 @@ import { randomUUID } from 'node:crypto'
 export function createVerificationRecord(result, reference) {
   return {
     id:              randomUUID(),
-    verification_id: result.verificationId ?? null,
+    verification_id: result.request_id ?? null,
     reference,
     verdict:         result.verdict,
     score:           result.score,
-    face_match:      result.faceMatch,
-    is_live:         result.livenessPass,
-    document_fields: result.documentFields
-      ? {
-          name:            result.documentFields.name            ?? null,
-          date_of_birth:   result.documentFields.dateOfBirth     ?? null,
-          document_number: result.documentFields.documentNumber  ?? null,
-          expiry_date:     result.documentFields.expiryDate      ?? null,
-        }
-      : {},
+    face_match:      result.face_match,
+    is_live:         result.liveness_pass,
+    document_fields: result.document_fields ?? {},
     created_at: new Date().toISOString(),
   }
 }
