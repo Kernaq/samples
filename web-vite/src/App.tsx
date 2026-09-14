@@ -3,52 +3,80 @@
  *
  * Flow:
  *  1. User clicks "Verify Identity"
- *  2. <kernaq-verify> drop-in modal handles document, selfie, liveness
- *  3. On complete, the backend receives the result (already stored)
+ *  2. <kernaq-verify> drop-in widget handles document front+back, selfie, liveness
+ *  3. On kernaq:complete the result is displayed and stored via the backend
  *  4. Frontend fetches /verifications to show history
+ *
+ * The widget cannot be dismissed mid-flow — the user must complete verification.
+ * The developer controls visibility via the `visible` state.
  */
 import { useEffect, useRef, useState } from 'react'
 import '@kernaq/verify'
 import type { VerifyResult } from '@kernaq/verify'
+import './index.css'
 
-// Tell TypeScript about the custom element
-declare global {
+// ── TypeScript — teach React about the custom element ─────────────────────────
+type KernaqVerifyAttributes = React.DetailedHTMLProps<
+  React.HTMLAttributes<HTMLElement>,
+  HTMLElement
+> & {
+  'backend-url'?:    string
+  'document-type'?:  string
+  country?:          string
+  reference?:        string
+  steps?:            string
+  sandbox?:          boolean | string
+  'accent-color'?:   string
+  'theme-mode'?:     'light' | 'dark'
+  'liveness-tasks'?: string
+}
+
+declare module 'react' {
   namespace JSX {
     interface IntrinsicElements {
-      'kernaq-verify': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
-        'backend-url'?: string
-        country?: string
-        reference?: string
-        'accent-color'?: string
-        'theme-mode'?: string
-      }
+      'kernaq-verify': KernaqVerifyAttributes
     }
   }
 }
 
-interface Verification {
-  id: string
-  reference: string
-  verdict: 'pass' | 'fail' | 'review'
-  score: number
-  face_match: boolean
-  is_live: boolean
-  document_fields?: Record<string, string>
-  created_at: string
+// ── Types from backend (/verifications endpoint) ──────────────────────────────
+interface VerificationRecord {
+  id:               string
+  verification_id:  string | null
+  reference:        string
+  verdict:          'pass' | 'fail' | 'review'
+  score:            number
+  face_match:       boolean
+  is_live:          boolean
+  document_fields?: {
+    name?:             string
+    date_of_birth?:    string
+    document_number?:  string
+    expiry_date?:      string
+    country?:          string
+    document_type?:    string
+  }
+  error?:      string
+  created_at:  string
 }
 
+// ── Config ────────────────────────────────────────────────────────────────────
 const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000'
 
-const VERDICT_COLOR = { pass: '#10b981', fail: '#ef4444', review: '#f59e0b' }
-const VERDICT_ICON  = { pass: '✅', fail: '❌', review: '⏳' }
+const VERDICT_COLOR: Record<string, string> = {
+  pass:   '#10b981',
+  fail:   '#ef4444',
+  review: '#f59e0b',
+}
 
 export default function App() {
-  const verifyRef                       = useRef<HTMLElement>(null)
-  const [showVerify, setShowVerify]     = useState(false)
-  const [lastResult, setLastResult]     = useState<VerifyResult | null>(null)
-  const [history, setHistory]           = useState<Verification[]>([])
-  const [loading, setLoading]           = useState(false)
+  const widgetRef                           = useRef<HTMLElement>(null)
+  const [showWidget, setShowWidget]         = useState(false)
+  const [lastResult, setLastResult]         = useState<VerifyResult | null>(null)
+  const [history, setHistory]               = useState<VerificationRecord[]>([])
+  const [loading, setLoading]               = useState(false)
 
+  // ── Load history ─────────────────────────────────────────────────────────────
   async function loadHistory() {
     setLoading(true)
     try {
@@ -64,36 +92,42 @@ export default function App() {
 
   useEffect(() => { loadHistory() }, [])
 
-  // Wire up web component events
+  // ── Wire up widget events after it mounts ─────────────────────────────────────
   useEffect(() => {
-    const el = verifyRef.current
+    const el = widgetRef.current
     if (!el) return
+
     const onComplete = (e: Event) => {
-      setLastResult((e as CustomEvent<VerifyResult>).detail)
-      setShowVerify(false)
+      const result = (e as CustomEvent<VerifyResult>).detail
+      setLastResult(result)
+      setShowWidget(false)
       loadHistory()
     }
-    const onCancel = () => setShowVerify(false)
-    el.addEventListener('kernaq:complete', onComplete)
-    el.addEventListener('kernaq:cancel', onCancel)
-    return () => {
-      el.removeEventListener('kernaq:complete', onComplete)
-      el.removeEventListener('kernaq:cancel', onCancel)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showVerify])
 
+    el.addEventListener('kernaq:complete', onComplete)
+    return () => el.removeEventListener('kernaq:complete', onComplete)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showWidget])
+
+  // ── Open widget ───────────────────────────────────────────────────────────────
   function openVerify() {
     setLastResult(null)
-    setShowVerify(true)
-    // open() after mount
+    setShowWidget(true)
+    // Programmatically open after mount so the element is in the DOM
     setTimeout(() => {
-      const el = verifyRef.current as HTMLElement & { open?: (c: object) => void }
+      const el = widgetRef.current as HTMLElement & {
+        open?: (cfg: object) => void
+      }
       el?.open?.({
-        backendUrl: `${BACKEND}/verify`,
-        country: 'KEN',
-        reference: `demo_${Date.now()}`,
-        theme: { accentColor: '#6366f1', mode: 'dark' },
+        backendUrl:    `${BACKEND}/verify`,
+        country:       'KEN',
+        documentType:  'national_id',
+        reference:     `demo_${Date.now()}`,
+        steps:         ['document', 'selfie', 'liveness'],
+        theme: {
+          accentColor: '#6366f1',
+          mode:        'dark',
+        },
       })
     }, 50)
   }
@@ -116,8 +150,10 @@ export default function App() {
         <section className="hero">
           <h1>KYC Verification Demo</h1>
           <p className="subtitle">
-            A full Kernaq Identity integration. The <code>{'<kernaq-verify>'}</code> drop-in component
-            handles document capture, selfie, and liveness. The backend stores results in memory.
+            A full Kernaq Identity integration using the{' '}
+            <code>{'<kernaq-verify>'}</code> drop-in Web Component (v2).
+            The widget handles document front &amp; back, selfie, and liveness.
+            Results are stored by the backend and shown below.
           </p>
           <div className="actions">
             <button className="btn-primary" onClick={openVerify}>
@@ -129,34 +165,43 @@ export default function App() {
           </div>
         </section>
 
-        {/* Backend URL */}
+        {/* Backend info */}
         <div className="info-bar">
           <span className="muted">Backend:</span>
           <code className="code">{BACKEND}</code>
-          <span className="muted small">change VITE_BACKEND_URL in .env</span>
+          <span className="muted small">— set VITE_BACKEND_URL in .env to switch backends</span>
         </div>
 
         {/* Last result */}
         {lastResult && (
           <section className="section">
-            <h2>Last Result</h2>
-            <div className="verdict-card" style={{ borderColor: VERDICT_COLOR[lastResult.verdict] + '44', background: VERDICT_COLOR[lastResult.verdict] + '11' }}>
+            <h2>Latest result</h2>
+            <div
+              className="verdict-card"
+              style={{
+                borderColor: VERDICT_COLOR[lastResult.verdict] + '44',
+                background:  VERDICT_COLOR[lastResult.verdict] + '11',
+              }}
+            >
               <div className="verdict-header">
-                <span className="verdict-icon">{VERDICT_ICON[lastResult.verdict]}</span>
                 <div>
                   <div className="verdict-label" style={{ color: VERDICT_COLOR[lastResult.verdict] }}>
                     {lastResult.verdict.toUpperCase()}
                   </div>
                   <div className="verdict-meta">
-                    Score: {lastResult.score} · Face match: {lastResult.faceMatch ? 'Yes' : 'No'} · Live: {lastResult.isLive ? 'Yes' : 'No'}
+                    Score: {lastResult.score}
+                    {' · '}Face match: {lastResult.faceMatch ? 'Yes' : 'No'}
+                    {' · '}Live: {lastResult.isLive ? 'Yes' : 'No'}
                   </div>
                 </div>
-                <code className="ref-id">{lastResult.verificationId}</code>
+                {lastResult.verificationId && (
+                  <code className="ref-id">{lastResult.verificationId}</code>
+                )}
               </div>
-              {lastResult.documentFields && (
+              {lastResult.documentFields && Object.keys(lastResult.documentFields).length > 0 && (
                 <div className="doc-fields">
                   {Object.entries(lastResult.documentFields).map(([k, v]) =>
-                    v ? (
+                    v && v !== 'false' ? (
                       <div className="field" key={k}>
                         <span className="field-key">{k.replace(/_/g, ' ')}</span>
                         <span className="field-val">{String(v)}</span>
@@ -169,7 +214,7 @@ export default function App() {
           </section>
         )}
 
-        {/* History */}
+        {/* History table */}
         <section className="section">
           <h2>
             Verification History
@@ -178,7 +223,9 @@ export default function App() {
           {loading && history.length === 0 ? (
             <div className="empty">Loading…</div>
           ) : history.length === 0 ? (
-            <div className="empty">No verifications yet. Click Verify Identity to run one.</div>
+            <div className="empty">
+              No verifications yet. Click <strong>Verify Identity</strong> to run one.
+            </div>
           ) : (
             <div className="table-wrap">
               <table className="table">
@@ -187,7 +234,7 @@ export default function App() {
                     <th>Reference</th>
                     <th>Verdict</th>
                     <th>Score</th>
-                    <th>Face Match</th>
+                    <th>Face</th>
                     <th>Live</th>
                     <th>Name</th>
                     <th>Document #</th>
@@ -199,8 +246,14 @@ export default function App() {
                     <tr key={v.id}>
                       <td><code className="small">{v.reference}</code></td>
                       <td>
-                        <span className="verdict-pill" style={{ background: VERDICT_COLOR[v.verdict] + '22', color: VERDICT_COLOR[v.verdict] }}>
-                          {VERDICT_ICON[v.verdict]} {v.verdict}
+                        <span
+                          className="verdict-pill"
+                          style={{
+                            background: VERDICT_COLOR[v.verdict] + '22',
+                            color:      VERDICT_COLOR[v.verdict],
+                          }}
+                        >
+                          {v.verdict}
                         </span>
                       </td>
                       <td>{v.score}</td>
@@ -208,7 +261,9 @@ export default function App() {
                       <td>{v.is_live ? '✓' : '✗'}</td>
                       <td>{v.document_fields?.name ?? '—'}</td>
                       <td>{v.document_fields?.document_number ?? '—'}</td>
-                      <td className="muted">{new Date(v.created_at).toLocaleTimeString()}</td>
+                      <td className="muted">
+                        {new Date(v.created_at).toLocaleTimeString()}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -218,14 +273,17 @@ export default function App() {
         </section>
       </main>
 
-      {/* Drop-in verify component */}
-      {showVerify && (
+      {/* ── Drop-in verify widget ── */}
+      {showWidget && (
         <kernaq-verify
-          ref={verifyRef}
+          ref={widgetRef}
           backend-url={`${BACKEND}/verify`}
+          document-type="national_id"
           country="KEN"
+          steps="document,selfie,liveness"
           accent-color="#6366f1"
           theme-mode="dark"
+          liveness-tasks="2"
         />
       )}
     </div>
